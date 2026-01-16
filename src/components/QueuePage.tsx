@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { QueueItem } from '../App'
+import type { QueueItem } from '../App'
 
 interface QueuePageProps {
   queueTitle: string
