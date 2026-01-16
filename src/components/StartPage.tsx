@@ -1,41 +1,80 @@
 import { useState } from 'react'
+import type { QueueSettings } from '../App'
 
 interface StartPageProps {
-  onCreateQueue: (title: string) => void
+  onCreateQueue: (settings: QueueSettings) => void
 }
 
 export default function StartPage({ onCreateQueue }: StartPageProps) {
   const [title, setTitle] = useState('')
+  const [activeTimeStart, setActiveTimeStart] = useState('15:00')
+  const [activeTimeEnd, setActiveTimeEnd] = useState('17:00')
+  const [sessionLength, setSessionLength] = useState(10)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (title.trim()) {
-      onCreateQueue(title.trim())
+    if (title.trim() && activeTimeStart && activeTimeEnd && sessionLength > 0) {
+      onCreateQueue({
+        title: title.trim(),
+        activeTimeStart,
+        activeTimeEnd,
+        sessionLengthMinutes: sessionLength
+      })
     }
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-8">
-      <div className="w-full max-w-md">
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div>
+    <div className="start-page">
+      <div className="start-card">
+        <h1>Köhantering</h1>
+        <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label className="form-label">Vad gäller kön?</label>
             <input
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Skriv vad kön gäller (t.ex. VR, Laser, Musik)"
-              className="w-full px-6 py-4 text-lg bg-gray-800/50 border border-gray-700 rounded-lg
-                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
-                         placeholder-gray-500 text-white"
+              placeholder="t.ex. VR, Laser, Musik"
+              className="form-input"
               autoFocus
             />
           </div>
+
+          <div className="form-group">
+            <label className="form-label">Aktiv tid för kön</label>
+            <div className="time-range-inputs">
+              <input
+                type="time"
+                value={activeTimeStart}
+                onChange={(e) => setActiveTimeStart(e.target.value)}
+                className="form-input"
+              />
+              <span className="time-separator">–</span>
+              <input
+                type="time"
+                value={activeTimeEnd}
+                onChange={(e) => setActiveTimeEnd(e.target.value)}
+                className="form-input"
+              />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Tid per person (minuter)</label>
+            <input
+              type="number"
+              min="1"
+              max="120"
+              value={sessionLength}
+              onChange={(e) => setSessionLength(Number(e.target.value))}
+              className="form-input"
+            />
+          </div>
+
           <button
             type="submit"
-            disabled={!title.trim()}
-            className="w-full px-6 py-4 text-lg font-medium bg-blue-600 hover:bg-blue-700
-                       disabled:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50
-                       rounded-lg transition-colors duration-200"
+            disabled={!title.trim() || sessionLength <= 0}
+            className="btn btn-primary"
           >
             Skapa kö
           </button>

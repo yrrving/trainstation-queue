@@ -1,29 +1,130 @@
 import { useState } from 'react'
-import type { QueueItem } from '../App'
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core'
+import type { DragEndEvent } from '@dnd-kit/core'
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import type { QueueItem, Queue } from '../App'
 
 interface QueuePageProps {
-  queueTitle: string
-  queue: QueueItem[]
-  locked: boolean
+  queue: Queue
   onAddToQueue: (name: string) => void
-  onRemoveFromQueue: (index: number) => void
+  onRemoveFromQueue: (itemId: string) => void
   onToggleLock: (code?: string) => void
-  onReset: () => void
+  onReorderQueue: (items: QueueItem[]) => void
+  onBack: () => void
+}
+
+function formatTime(date: Date): string {
+  return date.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })
+}
+
+interface SortableItemProps {
+  item: QueueItem
+  index: number
+  locked: boolean
+  onRemove: (itemId: string) => void
+}
+
+function SortableItem({ item, index, locked, onRemove }: SortableItemProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: item.id, disabled: locked })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  }
+
+  const stateClass = `queue-item-${item.state}`
+
+  const handleRemove = () => {
+    if (window.confirm('Är du säker på att du vill ta bort?')) {
+      onRemove(item.id)
+    }
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`queue-item ${stateClass} ${!locked ? 'queue-item-draggable' : ''}`}
+      {...attributes}
+      {...listeners}
+    >
+      <div className="queue-item-content">
+        <div className="queue-item-left">
+          {!locked && <span className="drag-handle">☰</span>}
+          <span className="queue-item-number">{index + 1}</span>
+          <div className="queue-item-info">
+            <span className="queue-item-name">{item.name}</span>
+            <span className="queue-item-time">
+              {formatTime(item.sessionStart)} – {formatTime(item.sessionEnd)}
+            </span>
+          </div>
+        </div>
+        <div className="queue-item-right">
+          {item.state === 'active' && (
+            <span className="queue-badge queue-badge-active">Nu</span>
+          )}
+          {item.state === 'next-up' && (
+            <span className="queue-badge queue-badge-next">Nästa snart</span>
+          )}
+          {item.state === 'completed' && (
+            <span className="queue-badge queue-badge-completed">Klar</span>
+          )}
+        </div>
+      </div>
+      {!locked && (
+        <button
+          onClick={handleRemove}
+          className="queue-item-remove"
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          ×
+        </button>
+      )}
+    </div>
+  )
 }
 
 export default function QueuePage({
-  queueTitle,
   queue,
-  locked,
   onAddToQueue,
   onRemoveFromQueue,
   onToggleLock,
-  onReset,
+  onReorderQueue,
+  onBack,
 }: QueuePageProps) {
   const [showAddDialog, setShowAddDialog] = useState(false)
   const [showUnlockDialog, setShowUnlockDialog] = useState(false)
   const [newName, setNewName] = useState('')
   const [unlockCode, setUnlockCode] = useState('')
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  )
 
   const handleAddName = () => {
     if (newName.trim()) {
@@ -33,130 +134,107 @@ export default function QueuePage({
     }
   }
 
-  const handleRemove = (index: number) => {
-    if (window.confirm('Är du säker på att du vill ta bort?')) {
-      onRemoveFromQueue(index)
-    }
-  }
-
   const handleUnlock = () => {
     onToggleLock(unlockCode)
     setUnlockCode('')
     setShowUnlockDialog(false)
   }
 
-  const handleReset = () => {
-    if (window.confirm('Detta tar bort hela kön och går tillbaka till start.')) {
-      onReset()
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+
+    if (!over || active.id === over.id) {
+      return
     }
+
+    const oldIndex = queue.items.findIndex((item) => item.id === active.id)
+    const newIndex = queue.items.findIndex((item) => item.id === over.id)
+
+    const reorderedItems = arrayMove(queue.items, oldIndex, newIndex)
+    onReorderQueue(reorderedItems)
   }
 
   return (
-    <div className="min-h-screen flex flex-col p-8">
-      {/* Header */}
-      <header className="text-center mb-8">
-        <h1 className="text-4xl font-bold">{queueTitle}</h1>
+    <div className="queue-page">
+      <header className="queue-header">
+        <button onClick={onBack} className="back-button">
+          ← Tillbaka till översikt
+        </button>
+        <h1>{queue.queueTitle}</h1>
+        <p className="queue-time-info">
+          {queue.activeTimeStart} – {queue.activeTimeEnd} · {queue.sessionLengthMinutes} min per person
+        </p>
       </header>
 
-      {/* Queue Area */}
-      <div className="flex-1 flex flex-col items-center justify-start space-y-3 mb-8">
-        {queue.length === 0 ? (
-          <p className="text-gray-400 text-lg">Ingen i kön än</p>
+      <div className="queue-area">
+        {queue.items.length === 0 ? (
+          <p className="queue-empty">Ingen i kön än</p>
         ) : (
-          queue.map((item, index) => (
-            <div
-              key={item.createdAt}
-              className={`
-                w-full max-w-md px-6 py-4 rounded-lg flex items-center justify-between
-                ${
-                  index === 0
-                    ? 'bg-green-600/30 border-2 border-green-500 shadow-lg scale-105'
-                    : 'bg-gray-800/50 border border-gray-700'
-                }
-              `}
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={queue.items.map(item => item.id)}
+              strategy={verticalListSortingStrategy}
             >
-              <div className="flex items-center space-x-4">
-                <span className="text-2xl font-bold text-gray-400">
-                  {index + 1}
-                </span>
-                <span className="text-xl">{item.name}</span>
-              </div>
-              {!locked && (
-                <button
-                  onClick={() => handleRemove(index)}
-                  className="text-red-400 hover:text-red-300 text-2xl font-bold"
-                >
-                  ×
-                </button>
-              )}
-            </div>
-          ))
+              {queue.items.map((item, index) => (
+                <SortableItem
+                  key={item.id}
+                  item={item}
+                  index={index}
+                  locked={queue.locked}
+                  onRemove={onRemoveFromQueue}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
         )}
       </div>
 
-      {/* Footer Buttons */}
-      <footer className="flex flex-col items-center space-y-3">
-        <div className="flex space-x-4">
+      <footer className="queue-footer">
+        <div className="queue-actions">
           <button
             onClick={() => setShowAddDialog(true)}
-            disabled={locked}
-            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700
-                       disabled:opacity-50 disabled:cursor-not-allowed rounded-lg
-                       transition-colors duration-200 font-medium"
+            disabled={queue.locked}
+            className="btn btn-primary"
           >
             Lägg till
           </button>
 
           <button
-            onClick={() => locked ? setShowUnlockDialog(true) : onToggleLock()}
-            className={`px-6 py-3 rounded-lg transition-colors duration-200 font-medium
-                       ${
-                         locked
-                           ? 'bg-red-600 hover:bg-red-700'
-                           : 'bg-yellow-600 hover:bg-yellow-700'
-                       }`}
+            onClick={() => queue.locked ? setShowUnlockDialog(true) : onToggleLock()}
+            className={queue.locked ? 'btn btn-danger' : 'btn btn-warning'}
           >
-            {locked ? 'Lås upp' : 'Lås'}
-          </button>
-
-          <button
-            onClick={handleReset}
-            disabled={locked}
-            className="px-6 py-3 bg-gray-600 hover:bg-gray-700 disabled:bg-gray-700
-                       disabled:opacity-50 disabled:cursor-not-allowed rounded-lg
-                       transition-colors duration-200 font-medium"
-          >
-            Nollställ
+            {queue.locked ? 'Lås upp' : 'Lås'}
           </button>
         </div>
 
-        {locked && (
-          <p className="text-sm text-yellow-500">
-            🔒 Kön är låst - ingen kan lägga till eller ta bort
+        {queue.locked && (
+          <p className="queue-lock-notice">
+            Kön är låst - ingen kan lägga till, ta bort eller flytta
           </p>
         )}
       </footer>
 
-      {/* Add Name Dialog */}
       {showAddDialog && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold mb-4">Lägg till i kö</h2>
+        <div className="dialog-overlay">
+          <div className="dialog">
+            <h2>Lägg till i kö</h2>
             <input
               type="text"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               placeholder="Namn"
-              className="w-full px-4 py-3 bg-gray-900 border border-gray-700 rounded-lg
-                         focus:outline-none focus:ring-2 focus:ring-blue-500
-                         text-white mb-4"
+              className="form-input"
               autoFocus
               onKeyDown={(e) => e.key === 'Enter' && handleAddName()}
             />
-            <div className="flex space-x-3">
+            <div className="dialog-actions">
               <button
                 onClick={handleAddName}
-                className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg"
+                className="btn btn-primary"
               >
                 OK
               </button>
@@ -165,7 +243,7 @@ export default function QueuePage({
                   setNewName('')
                   setShowAddDialog(false)
                 }}
-                className="flex-1 px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg"
+                className="btn btn-secondary"
               >
                 Avbryt
               </button>
@@ -174,26 +252,23 @@ export default function QueuePage({
         </div>
       )}
 
-      {/* Unlock Dialog */}
       {showUnlockDialog && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold mb-4">Lås upp kö</h2>
+        <div className="dialog-overlay">
+          <div className="dialog">
+            <h2>Lås upp kö</h2>
             <input
               type="password"
               value={unlockCode}
               onChange={(e) => setUnlockCode(e.target.value)}
               placeholder="Ange kod"
-              className="w-full px-4 py-3 bg-gray-900 border border-gray-700 rounded-lg
-                         focus:outline-none focus:ring-2 focus:ring-blue-500
-                         text-white mb-4"
+              className="form-input"
               autoFocus
               onKeyDown={(e) => e.key === 'Enter' && handleUnlock()}
             />
-            <div className="flex space-x-3">
+            <div className="dialog-actions">
               <button
                 onClick={handleUnlock}
-                className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg"
+                className="btn btn-primary"
               >
                 OK
               </button>
@@ -202,7 +277,7 @@ export default function QueuePage({
                   setUnlockCode('')
                   setShowUnlockDialog(false)
                 }}
-                className="flex-1 px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg"
+                className="btn btn-secondary"
               >
                 Avbryt
               </button>
